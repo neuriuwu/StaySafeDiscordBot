@@ -13,10 +13,12 @@ Welcome to **StaySafeBot**, your little digital sanctuary in Discord! Whether yo
 
 ## 🌟 Magical Features
 
-* **`/talk`**: Chat away in casual, vent, practical-advice, or identity-safe modes!
+* **Natural chat**: Mention the bot, reply to one of its messages, or message it in a DM/private thread.
+* **Image understanding**: Attach images to a message or include them in a reply to a bot message.
+* **`/mode`**: Choose casual, vent, advice, or identity mode for yourself in the current channel.
 * **`/rant`**: Need to let it all out? This gives you a listening-first, completely nonjudgmental response. :3
 * **`/private`**: Creates a cozy, invite-only private thread just for you and the bot!
-* **Automatic Replies**: Responds when someone mentions it or sends a message inside its special private threads.
+* **Automatic Replies**: Responds to mentions, replies to its messages, DMs, and private-thread messages.
 * **`/reset`**: Clears *only* your personal conversation history in the current channel/thread so you can start fresh. ><
 * **Memory & Privacy**: Conversation history lives safely in process memory only (restarting clears it!), keeping everyone's chats completely isolated.
 * **Lightning Fast**: Powered by low-effort thinking for super quick, snappy replies!
@@ -81,13 +83,15 @@ python main.py
 
 ## 💬 Commands & How to Play
 
-* `/talk message:<text> mode:<mode>` — Kick off or continue a chat in the current channel/thread.
+* Mention the bot, reply to one of its messages, or message it in a DM/private thread to chat.
+* Attach an image to a message to ask the bot about it.
+* `/mode mode:<mode>` — Set your mode for the current channel; the choice is per user.
 * `/rant message:<text>` — Jump right into the cozy vent/listening mode!
 * `/private` — Spin up a secret little invite-only thread.
 * `/reset` — Wipe your personal history slate clean.
 * `/help` — Peek at the commands and safety disclaimer anytime.
 
-The bot also perks up when you mention it directly in a channel, but it won't spam every single public message—it likes its peace and quiet too! 🐾
+The bot won't respond to every ordinary message in public channels; mention it or reply to one of its messages there.
 
 ---
 

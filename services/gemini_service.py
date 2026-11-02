@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
@@ -15,6 +16,12 @@ MODEL_NAME: Final[str] = "gemini-3.5-flash-lite"
 MAX_HISTORY_MESSAGES: Final[int] = 24
 MAX_SESSIONS: Final[int] = 500
 MAX_OUTPUT_TOKENS: Final[int] = 500
+
+
+def clean_model_text(text: str) -> str:
+    """Remove HTML/XML tags from model output while keeping surrounding text."""
+    return re.sub(r"<[^>]+>", "", text).strip()
+
 
 MODE_INSTRUCTIONS: Final[dict[str, str]] = {
     "casual": (
@@ -52,6 +59,7 @@ CORE RULES & VIBE:
 - Ban list: "delve", "navigate", "multifaceted", "bestie", "foster", "tapestry", "journey".
 - If they say hi, just say something normal like "yo" or "what's good" or "hey".
 Never act like an AI, never drop robotic disclaimers, and definitely never sound like a brand twitter account.
+- Output plain text and standard Discord markdown only. Never output HTML tags, XML tags, or paragraph wrappers such as <p>...</p>.
 
 Current conversation mode: {mode_instruction}
 """
@@ -106,15 +114,29 @@ class GeminiChatService:
         return conversation
 
     async def reply(self, session_key: str, message: str, mode: str = "casual") -> str:
-        """Generate one response and retain successful turns for the same user."""
+        """Generate a text response and retain successful turns for the same user."""
+        return await self.reply_multimodal(session_key, [message], mode)
+
+    async def reply_multimodal(
+        self,
+        session_key: str,
+        parts: list[types.Part | str],
+        mode: str = "casual",
+    ) -> str:
+        """Generate a response from text and image parts in one user turn."""
+        if not parts:
+            raise ValueError("At least one text or image part is required.")
+
+        normalized_parts = [
+            types.Part.from_text(text=part) if isinstance(part, str) else part
+            for part in parts
+        ]
+        user_content = types.Content(role="user", parts=normalized_parts)
+
         normalized_mode = mode if mode in MODE_INSTRUCTIONS else "casual"
         conversation = self._get_conversation(session_key)
         async with conversation.lock:
-            user_content = types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=message)],
-            )
-            contents = [*conversation.history, user_content]
+            input_contents = [*conversation.history, user_content]
             config = types.GenerateContentConfig(
                 system_instruction=BASE_SYSTEM_INSTRUCTION.format(
                     mode_instruction=MODE_INSTRUCTIONS[normalized_mode]
@@ -127,15 +149,15 @@ class GeminiChatService:
             )
             started_at = time.perf_counter()
             logger.info(
-                "Gemini request started model=%s history_messages=%d input_chars=%d",
+                "Gemini request started model=%s history_messages=%d input_parts=%d",
                 self._model,
                 len(conversation.history),
-                len(message),
+                len(normalized_parts),
             )
             try:
                 response = await self._client.aio.models.generate_content(
                     model=self._model,
-                    contents=contents,
+                    contents=input_contents,
                     config=config,
                 )
             except errors.APIError as exc:
@@ -154,17 +176,21 @@ class GeminiChatService:
                     time.perf_counter() - started_at,
                 )
 
-            answer = response.text
-            if not answer or not answer.strip():
+            raw_answer = response.text
+            if not raw_answer or not raw_answer.strip():
                 logger.warning("Gemini returned an empty response.")
                 raise GeminiServiceError("Gemini returned an empty response.")
+            answer = clean_model_text(raw_answer)
+            if not answer:
+                logger.warning("Gemini response contained no text after HTML/XML cleanup.")
+                raise GeminiServiceError("Gemini returned no usable text.")
 
             model_content = types.Content(
                 role="model",
-                parts=[types.Part.from_text(text=answer.strip())],
+                parts=[types.Part.from_text(text=answer)],
             )
             conversation.history.extend((user_content, model_content))
-            return answer.strip()
+            return answer
 
     async def reset(self, session_key: str) -> None:
         """Clear history for one user and one Discord channel or thread."""

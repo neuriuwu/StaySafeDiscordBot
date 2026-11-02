@@ -3,18 +3,18 @@
 import logging
 import os
 import re
-from typing import Final, Literal
+from typing import Final
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+from google.genai import types
 
 from services.gemini_service import GeminiChatService, GeminiServiceError
 
 logger = logging.getLogger(__name__)
 DISCORD_MESSAGE_LIMIT: Final[int] = 2_000
 PRIVATE_THREAD_PREFIX: Final[str] = "safe-chat-"
-ConversationMode = Literal["casual", "vent", "advice", "identity"]
 
 
 def _session_key(
@@ -43,11 +43,12 @@ def _split_message(text: str) -> list[str]:
 
 
 class ChatCog(commands.Cog):
-    """Chat commands, private thread setup, and mention/thread responses."""
+    """Slash commands and natural-message handling for conversations."""
 
     def __init__(self, bot: commands.Bot, service: GeminiChatService) -> None:
         self.bot = bot
         self.service = service
+        self.user_modes: dict[tuple[int, int], str] = {}
 
     async def _reply_to_interaction(
         self,
@@ -78,34 +79,27 @@ class ChatCog(commands.Cog):
             mode=mode,
         )
 
-    @app_commands.command(name="talk", description="Chat with a supportive AI sounding board.")
-    @app_commands.describe(
-        message="What would you like to talk about?",
-        mode="Choose the tone that would feel most helpful.",
+    @app_commands.command(name="mode", description="Set your conversation mode in this channel.")
+    @app_commands.describe(mode="Choose how you'd like the bot to respond.")
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="Casual", value="casual"),
+            app_commands.Choice(name="Vent", value="vent"),
+            app_commands.Choice(name="Advice", value="advice"),
+            app_commands.Choice(name="Identity", value="identity"),
+        ]
     )
-    async def talk(
+    async def set_mode(
         self,
         interaction: discord.Interaction,
-        message: app_commands.Range[str, 1, 2_000],
-        mode: ConversationMode = "casual",
+        mode: app_commands.Choice[str],
     ) -> None:
-        """Start or continue a conversation in the current channel or thread."""
-        await interaction.response.defer(thinking=True)
-        try:
-            answer = await self._generate_reply(
-                channel_id=interaction.channel_id,
-                guild_id=interaction.guild_id,
-                user_id=interaction.user.id,
-                message=message,
-                mode=mode,
-            )
-        except GeminiServiceError as exc:
-            logger.exception("Gemini failed while handling /talk.")
-            if exc.rate_limited:
-                answer = "Gemini is rate-limiting requests right now. Please try again shortly."
-            else:
-                answer = "I couldn't reach the conversation service just now. Please try again shortly."
-        await self._reply_to_interaction(interaction, answer)
+        """Set a per-user, per-channel mode for natural message conversations."""
+        self.user_modes[(interaction.channel_id, interaction.user.id)] = mode.value
+        await interaction.response.send_message(
+            f"got it — i'll use **{mode.name.lower()}** mode for you in this channel",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="rant", description="Vent; I'll listen without rushing to fix things.")
     @app_commands.describe(message="What's weighing on you?")
@@ -183,7 +177,7 @@ class ChatCog(commands.Cog):
             await thread.add_user(interaction.user)
             await thread.send(
                 f"Hi {interaction.user.mention}. This is your private conversation thread. "
-                "Use `/talk` or `/rant` here whenever you'd like. "
+                "Just send me a message here whenever you'd like to talk. "
                 "I'm an AI sounding board, not a therapist or mental health professional."
             )
         except discord.HTTPException as exc:
@@ -239,7 +233,8 @@ class ChatCog(commands.Cog):
         await interaction.response.send_message(
             "**StaySafeBot** is an empathetic AI sounding board for casual chat, "
             "venting, brainstorming, and identity exploration.\n"
-            "• `/talk` — chat and choose a mode.\n"
+            "• Send me a message, mention me, or reply to one of my messages to chat.\n"
+            "• `/mode` — choose casual, vent, advice, or identity mode for this channel.\n"
             "• `/rant` — get a listening-first response.\n"
             "• `/private` — create an invite-only thread in this server.\n"
             "• `/reset` — clear your memory for this channel or thread.\n\n"
@@ -252,36 +247,91 @@ class ChatCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        """Reply to bot mentions and messages in private threads the bot created."""
+        """Respond to mentions, replies to the bot, DMs, and private threads."""
         if message.author.bot or self.bot.user is None:
             return
 
-        is_own_private_thread = (
+        bot_user = self.bot.user
+        is_mention = bot_user in message.mentions
+        is_direct_message = isinstance(
+            message.channel, (discord.DMChannel, discord.GroupChannel)
+        )
+        is_private_thread = (
             isinstance(message.channel, discord.Thread)
             and message.channel.type is discord.ChannelType.private_thread
-            and message.channel.owner_id == self.bot.user.id
         )
-        is_mention = self.bot.user in message.mentions
-        if not is_own_private_thread and not is_mention:
+
+        referenced_message: discord.Message | None = None
+        if message.reference is not None:
+            resolved = message.reference.resolved
+            if isinstance(resolved, discord.Message):
+                referenced_message = resolved
+            elif message.reference.message_id is not None:
+                try:
+                    referenced_message = await message.channel.fetch_message(
+                        message.reference.message_id
+                    )
+                except discord.HTTPException:
+                    logger.warning(
+                        "Could not fetch a replied-to message in channel %s.",
+                        message.channel.id,
+                        exc_info=True,
+                    )
+
+        is_reply_to_bot = (
+            referenced_message is not None
+            and referenced_message.author.id == bot_user.id
+        )
+        if not (
+            is_mention
+            or is_reply_to_bot
+            or is_direct_message
+            or is_private_thread
+        ):
             return
 
-        user_message = message.content
-        if is_mention:
-            user_message = user_message.replace(f"<@{self.bot.user.id}>", "")
-            user_message = user_message.replace(f"<@!{self.bot.user.id}>", "")
-        user_message = user_message.strip()
-        if not user_message:
-            return
+        user_message = re.sub(rf"<@!?{bot_user.id}>", "", message.content).strip()
+        attachments = list(message.attachments)
+        if is_reply_to_bot and referenced_message is not None:
+            attachments.extend(referenced_message.attachments)
 
+        input_parts: list[types.Part | str] = []
         try:
             async with message.channel.typing():
-                answer = await self._generate_reply(
-                    channel_id=message.channel.id,
-                    guild_id=message.guild.id if message.guild else None,
-                    user_id=message.author.id,
-                    message=user_message,
-                    mode="casual",
+                image_count = 0
+                for attachment in attachments:
+                    mime_type = attachment.content_type
+                    if mime_type is None or not mime_type.startswith("image/"):
+                        continue
+                    image_bytes = await attachment.read()
+                    input_parts.append(
+                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+                    )
+                    image_count += 1
+
+                if user_message:
+                    input_parts.insert(0, user_message)
+                elif image_count:
+                    input_parts.insert(0, "what's this?")
+                else:
+                    return
+
+                mode = self.user_modes.get(
+                    (message.channel.id, message.author.id),
+                    "casual",
                 )
+                answer = await self.service.reply_multimodal(
+                    session_key=_session_key(
+                        message.guild.id if message.guild else None,
+                        message.channel.id,
+                        message.author.id,
+                    ),
+                    parts=input_parts,
+                    mode=mode,
+                )
+        except discord.HTTPException:
+            logger.exception("Discord failed to download a message image attachment.")
+            answer = "i couldn't load that image from discord — could you try sending it again?"
         except GeminiServiceError as exc:
             logger.exception("Gemini failed while handling a Discord message.")
             if exc.rate_limited:
