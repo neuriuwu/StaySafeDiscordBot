@@ -29,7 +29,7 @@ Welcome to **StaySafeBot**, your little digital sanctuary in Discord! Whether yo
 
 * **Python 3.10** or later
 * A **Discord Application & Bot Token**
-* A **Google Gemini API key** with access to `gemini-3.8-flash`
+* A **Google Gemini API key** with access to `gemini-3.5-flash-lite`
 
 ---
 
