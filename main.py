@@ -23,7 +23,7 @@ class StaySafeBot(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.listening,
-                name="listening to your thoughts, lol",
+                name="listening to your thoughts, <3",
             )
         )
         logger.info("Connected to Discord as %s.", self.user)
