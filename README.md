@@ -9,6 +9,7 @@ Welcome to **StaySafeBot**, your little digital sanctuary in Discord! Whether yo
 > **Important Note!** 🌸
 > This is a friendly AI sounding board, *not* a licensed mental health professional or therapist. Its responses can sometimes make mistakes, and it's definitely not a crisis service. If someone is ever in immediate danger, please reach out to local emergency services or a trusted person right away! <3
 
+![Example chat <\3](DMexample.png)
 ---
 
 ## 🌟 Magical Features
