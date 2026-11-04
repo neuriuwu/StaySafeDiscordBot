@@ -14,6 +14,7 @@ from services.gemini_service import GeminiChatService, GeminiServiceError
 
 logger = logging.getLogger(__name__)
 DISCORD_MESSAGE_LIMIT: Final[int] = 2_000
+MAX_MEDIA_ATTACHMENT_BYTES: Final[int] = 15 * 1024 * 1024
 PRIVATE_THREAD_PREFIX: Final[str] = "safe-chat-"
 
 
@@ -295,22 +296,43 @@ class ChatCog(commands.Cog):
         if is_reply_to_bot and referenced_message is not None:
             attachments.extend(referenced_message.attachments)
 
+        media_attachments = [
+            attachment
+            for attachment in attachments
+            if attachment.content_type
+            and attachment.content_type.startswith(("image/", "video/"))
+        ]
+        total_media_size = sum(attachment.size for attachment in media_attachments)
+        if total_media_size > MAX_MEDIA_ATTACHMENT_BYTES:
+            await message.reply(
+                "that image or video is a bit too large for me to inspect "
+                "(the limit is 15 MB total) — try a smaller file or shorter clip",
+                mention_author=False,
+            )
+            return
+
         input_parts: list[types.Part | str] = []
         try:
             async with message.channel.typing():
                 image_count = 0
-                for attachment in attachments:
+                video_count = 0
+                for attachment in media_attachments:
                     mime_type = attachment.content_type
-                    if mime_type is None or not mime_type.startswith("image/"):
+                    if mime_type is None:
                         continue
-                    image_bytes = await attachment.read()
+                    media_bytes = await attachment.read()
                     input_parts.append(
-                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+                        types.Part.from_bytes(data=media_bytes, mime_type=mime_type)
                     )
-                    image_count += 1
+                    if mime_type.startswith("image/"):
+                        image_count += 1
+                    elif mime_type.startswith("video/"):
+                        video_count += 1
 
                 if user_message:
                     input_parts.insert(0, user_message)
+                elif video_count:
+                    input_parts.insert(0, "yo what's happening in this vid?")
                 elif image_count:
                     input_parts.insert(0, "what's this?")
                 else:
@@ -330,8 +352,8 @@ class ChatCog(commands.Cog):
                     mode=mode,
                 )
         except discord.HTTPException:
-            logger.exception("Discord failed to download a message image attachment.")
-            answer = "i couldn't load that image from discord — could you try sending it again?"
+            logger.exception("Discord failed to download a message media attachment.")
+            answer = "i couldn't load that image or video from discord — could you try sending it again?"
         except GeminiServiceError as exc:
             logger.exception("Gemini failed while handling a Discord message.")
             if exc.rate_limited:

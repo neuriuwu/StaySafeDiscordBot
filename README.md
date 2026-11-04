@@ -15,7 +15,7 @@ Welcome to **StaySafeBot**, your little digital sanctuary in Discord! Whether yo
 ## 🌟 Magical Features
 
 * **Natural chat**: Mention the bot, reply to one of its messages, or message it in a DM/private thread.
-* **Image understanding**: Attach images to a message or include them in a reply to a bot message.
+* **Image and video understanding**: Attach images or videos to a message or include them in a reply to a bot message. Media uploads are limited to 15 MB total per message.
 * **`/mode`**: Choose casual, vent, advice, or identity mode for yourself in the current channel.
 * **`/rant`**: Need to let it all out? This gives you a listening-first, completely nonjudgmental response. :3
 * **`/private`**: Creates a cozy, invite-only private thread just for you and the bot!
@@ -85,7 +85,7 @@ python main.py
 ## 💬 Commands & How to Play
 
 * Mention the bot, reply to one of its messages, or message it in a DM/private thread to chat.
-* Attach an image to a message to ask the bot about it.
+* Attach an image or video to a message to ask the bot about it; clips without a caption get a casual prompt automatically. The combined media size limit is 15 MB.
 * `/mode mode:<mode>` — Set your mode for the current channel; the choice is per user.
 * `/rant message:<text>` — Jump right into the cozy vent/listening mode!
 * `/private` — Spin up a secret little invite-only thread.
